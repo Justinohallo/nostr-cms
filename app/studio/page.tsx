@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import { StructuredContentForm } from '../components/StructuredContentForm';
 import { NostrLogin } from '../components/NostrLogin';
 import Link from 'next/link';
@@ -11,6 +11,8 @@ export default function StudioPage() {
   const [loading, setLoading] = useState(false);
   const { authenticated, publicKey, loading: authLoading, logout } = useAuth();
   const { items, isLoading, mutate } = useStructuredContent();
+  const formKeyRef = useRef(0);
+  const prevValuesRef = useRef<string>('');
 
   const handleSubmit = async (name: string, content: string) => {
     if (!authenticated || !publicKey) {
@@ -113,7 +115,7 @@ export default function StudioPage() {
       }
 
       if (data.success) {
-        // Optimistically update
+        // Optimistically update without triggering loading state
         const newItem = {
           id: data.id,
           name: data.name,
@@ -127,9 +129,20 @@ export default function StudioPage() {
           return { items: [newItem, ...filtered] };
         });
         
-        // Revalidate after a delay to ensure relay has indexed the event
-        setTimeout(() => {
-          mutate();
+        // Silently refetch after a delay to sync with relay (background, no loading state)
+        setTimeout(async () => {
+          try {
+            // Direct fetch without going through mutate to avoid loading state
+            const response = await fetch('/api/content/structured');
+            const fetchedData = await response.json();
+            if (fetchedData.items) {
+              // Update data silently without triggering loading
+              mutate((current) => ({ items: fetchedData.items }));
+            }
+          } catch (err) {
+            console.error('Background refetch error:', err);
+            // Silently fail - optimistic update is already shown
+          }
         }, 2000);
       }
     } catch (error) {
@@ -152,6 +165,15 @@ export default function StudioPage() {
       values: valuesItem?.content || '',
     };
   }, [items]);
+  
+  // Only update form key when values actually change (prevents unnecessary remounts)
+  useEffect(() => {
+    const valuesString = JSON.stringify(initialValues);
+    if (valuesString !== prevValuesRef.current) {
+      prevValuesRef.current = valuesString;
+      formKeyRef.current += 1;
+    }
+  }, [initialValues]);
 
   if (authLoading) {
     return (
@@ -219,7 +241,7 @@ export default function StudioPage() {
             </div>
           ) : (
             <StructuredContentForm 
-              key={JSON.stringify(initialValues)}
+              key={formKeyRef.current}
               onSubmit={handleSubmit} 
               isLoading={loading}
               initialValues={initialValues}

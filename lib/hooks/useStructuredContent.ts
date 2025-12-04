@@ -53,15 +53,16 @@ export function useStructuredContent() {
 
   const mutate = useCallback(async (updater?: (current: StructuredContentResponse | null) => StructuredContentResponse | null) => {
     if (updater) {
-      // Optimistic update
+      // Optimistic update only - don't refetch immediately
       const updated = updater(data);
       if (updated) {
         setData(updated);
+        setIsLoading(false); // Ensure loading is false after optimistic update
       }
+    } else {
+      // Only refetch when called without updater
+      await refetch();
     }
-    
-    // Always refetch after update
-    await refetch();
   }, [data, refetch]);
 
   return {
