@@ -1,11 +1,33 @@
 'use client';
 
-import { useState, useMemo, useRef, useEffect } from 'react';
-import { StructuredContentForm } from '../components/StructuredContentForm';
-import { NostrLogin } from '../components/NostrLogin';
+import { useEffect, useMemo, useRef, useState } from 'react';
+
 import Link from 'next/link';
-import { useStructuredContent } from '@/lib/hooks/useStructuredContent';
+import { NostrLogin } from '../components/NostrLogin';
+import { StructuredContentForm } from '../components/StructuredContentForm';
 import { useAuth } from '@/lib/hooks/useAuth';
+import { useStructuredContent } from '@/lib/hooks/useStructuredContent';
+
+// Type for window.nostr from nostr-login
+type NostrWindow = typeof window & {
+  nostr?: {
+    getPublicKey: () => Promise<string>;
+    signEvent: (event: {
+      kind: number;
+      created_at: number;
+      tags: string[][];
+      content: string;
+    }) => Promise<{
+      id: string;
+      pubkey: string;
+      created_at: number;
+      kind: number;
+      tags: string[][];
+      content: string;
+      sig: string;
+    }>;
+  };
+};
 
 export default function StudioPage() {
   const [loading, setLoading] = useState(false);
@@ -24,7 +46,7 @@ export default function StudioPage() {
     try {
       // Sign event client-side using NIP-07, manual key, or NIP-46
       let signedEvent;
-      
+
       const eventTemplate = {
         kind: 30000,
         created_at: Math.floor(Date.now() / 1000),
@@ -32,68 +54,14 @@ export default function StudioPage() {
         content,
       };
 
-      if (typeof window !== 'undefined' && (window as any).nostr) {
-        // Use NIP-07 browser extension
-        signedEvent = await (window as any).nostr.signEvent(eventTemplate);
-      } else if (typeof window !== 'undefined') {
-        // Try to use stored private key from manual login
-        const storedKey = sessionStorage.getItem('nostr_private_key');
-        if (storedKey) {
-          try {
-            const { getPublicKey, finalizeEvent } = await import('nostr-tools');
-            const { hexToBytes } = await import('@noble/hashes/utils');
-            const { decode, NostrTypeGuard } = await import('nostr-tools/nip19');
+      // Use window.nostr from nostr-login library
+      const nostrWindow = typeof window !== 'undefined' ? (window as NostrWindow) : null;
 
-            let privateKeyBytes: Uint8Array;
-            const trimmedKey = storedKey.trim();
-
-            // Handle nsec format
-            if (NostrTypeGuard.isNSec(trimmedKey)) {
-              const decoded = decode(trimmedKey);
-              if (decoded.type === 'nsec') {
-                privateKeyBytes = decoded.data;
-              } else {
-                throw new Error('Invalid nsec format');
-              }
-            } else {
-              // Handle hex format
-              let normalizedKey = trimmedKey.toLowerCase();
-              if (normalizedKey.startsWith('0x')) {
-                normalizedKey = normalizedKey.slice(2);
-              }
-              if (!/^[0-9a-f]+$/.test(normalizedKey)) {
-                throw new Error('Invalid hex characters');
-              }
-              if (normalizedKey.length === 63) {
-                normalizedKey = '0' + normalizedKey;
-              }
-              if (normalizedKey.length !== 64) {
-                throw new Error('Invalid private key length');
-              }
-              privateKeyBytes = hexToBytes(normalizedKey);
-            }
-
-            // Verify the stored key matches the authenticated public key
-            const keyPublicKey = getPublicKey(privateKeyBytes);
-            if (keyPublicKey !== publicKey) {
-              throw new Error('Stored private key does not match authenticated user');
-            }
-
-            signedEvent = finalizeEvent(eventTemplate, privateKeyBytes);
-          } catch (err) {
-            console.error('Error signing with stored key:', err);
-            alert('Failed to sign event. Please log out and log back in.');
-            setLoading(false);
-            return;
-          }
-        } else {
-          // No stored key and no NIP-07 extension
-          alert('Please install a Nostr browser extension (like Alby or nos2x) to sign events, or log out and log back in with your private key.');
-          setLoading(false);
-          return;
-        }
+      if (nostrWindow?.nostr) {
+        // nostr-login handles all signing (NIP-07, NIP-46, local, etc.)
+        signedEvent = await nostrWindow.nostr.signEvent(eventTemplate);
       } else {
-        alert('Unable to sign events in this environment');
+        alert('Nostr login not available. Please refresh the page and login again.');
         setLoading(false);
         return;
       }
@@ -122,13 +90,13 @@ export default function StudioPage() {
           content: data.content,
           createdAt: data.createdAt,
         };
-        
+
         mutate((current) => {
           if (!current) return { items: [newItem] };
           const filtered = current.items.filter((item) => item.name !== newItem.name);
           return { items: [newItem, ...filtered] };
         });
-        
+
         // Silently refetch after a delay to sync with relay (background, no loading state)
         setTimeout(async () => {
           try {
@@ -165,7 +133,7 @@ export default function StudioPage() {
       values: valuesItem?.content || '',
     };
   }, [items]);
-  
+
   // Only update form key when values actually change (prevents unnecessary remounts)
   useEffect(() => {
     const valuesString = JSON.stringify(initialValues);
@@ -234,15 +202,15 @@ export default function StudioPage() {
               </Link>
             </div>
           </div>
-          
+
           {isLoading ? (
             <div className="flex items-center justify-center py-12">
               <div className="text-gray-500 dark:text-gray-400">Loading...</div>
             </div>
           ) : (
-            <StructuredContentForm 
+            <StructuredContentForm
               key={formKeyRef.current}
-              onSubmit={handleSubmit} 
+              onSubmit={handleSubmit}
               isLoading={loading}
               initialValues={initialValues}
             />
