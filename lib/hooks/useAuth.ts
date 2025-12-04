@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 
 interface AuthState {
   authenticated: boolean;
@@ -14,6 +14,7 @@ export function useAuth() {
     publicKey: null,
     loading: true,
   });
+  const hasCheckedRef = useRef(false);
 
   const checkAuth = useCallback(async () => {
     try {
@@ -43,9 +44,11 @@ export function useAuth() {
     }
   }, []);
 
-  useEffect(() => {
+  // Lazy initialization - check auth on first access if not already checked
+  if (!hasCheckedRef.current && authState.loading) {
+    hasCheckedRef.current = true;
     checkAuth();
-  }, [checkAuth]);
+  }
 
   const logout = async () => {
     try {

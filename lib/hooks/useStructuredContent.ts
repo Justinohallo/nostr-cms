@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { StructuredContentItem } from '@/lib/nostr/events';
 
 // Re-export for convenience
@@ -27,6 +27,7 @@ export function useStructuredContent() {
   const [data, setData] = useState<StructuredContentResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
+  const hasFetchedRef = useRef(false);
 
   const refetch = useCallback(async () => {
     setIsLoading(true);
@@ -42,9 +43,11 @@ export function useStructuredContent() {
     }
   }, []);
 
-  useEffect(() => {
+  // Lazy initialization - fetch on first access if not already fetched
+  if (!hasFetchedRef.current && isLoading && !data) {
+    hasFetchedRef.current = true;
     refetch();
-  }, [refetch]);
+  }
 
   const credentialsError = (error as any)?.credentialsError === true;
 
