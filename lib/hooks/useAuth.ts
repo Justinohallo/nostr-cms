@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 interface AuthState {
   authenticated: boolean;
@@ -15,11 +15,7 @@ export function useAuth() {
     loading: true,
   });
 
-  useEffect(() => {
-    checkAuth();
-  }, []);
-
-  const checkAuth = async () => {
+  const checkAuth = useCallback(async () => {
     try {
       const response = await fetch('/api/auth/me');
       const data = await response.json();
@@ -45,12 +41,16 @@ export function useAuth() {
         loading: false,
       });
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    checkAuth();
+  }, [checkAuth]);
 
   const logout = async () => {
     try {
       await fetch('/api/auth/logout', { method: 'POST' });
-      
+
       // Clear stored private key from sessionStorage
       if (typeof window !== 'undefined') {
         try {
@@ -59,7 +59,7 @@ export function useAuth() {
           console.warn('Failed to clear private key from sessionStorage:', err);
         }
       }
-      
+
       setAuthState({
         authenticated: false,
         publicKey: null,

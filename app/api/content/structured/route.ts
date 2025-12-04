@@ -1,16 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyEvent, SimplePool, Event } from 'nostr-tools';
+import { verifyEvent, Event } from 'nostr-tools';
 import { getSessionFromRequest } from '@/lib/auth/session';
-
-const relayUrl = process.env.NOSTR_RELAY_URL || 'wss://relay.damus.io';
-
-// Structured content interface
-interface StructuredContentItem {
-  id: string;
-  name: string;
-  content: string;
-  createdAt: string;
-}
+import { publishEvent, subscribeToEvents } from '@/lib/nostr/relay';
+import { transformEventToItem, sortItemsByDate, StructuredContentItem } from '@/lib/nostr/events';
 
 // POST - Create/update structured content
 // Accepts a signed event from the client
@@ -62,48 +54,19 @@ export async function POST(request: NextRequest) {
     }
 
     // Extract name from d tag
-    const dTag = event.tags.find((tag) => tag[0] === 'd');
-    const name = dTag ? dTag[1] : 'unknown';
+    const name = transformEventToItem(event).name;
 
-    // Publish to Nostr relay (server-side)
-    const pool = new SimplePool();
-    const relays = [relayUrl];
+    // Publish to Nostr relay
+    await publishEvent(event);
 
-    try {
-      // pool.publish returns an array of promises (one per relay)
-      const publishPromises = pool.publish(relays, event);
-      
-      // Wait for all relays to confirm receipt
-      const results = await Promise.allSettled(publishPromises);
-      
-      // Check if at least one relay accepted the event
-      const hasSuccess = results.some(
-        (result) => result.status === 'fulfilled' && result.value !== null
-      );
-      
-      if (!hasSuccess) {
-        console.error('Failed to publish to any relay:', results);
-        throw new Error('Failed to publish event to relay');
-      }
-      
-      // Give relay a moment to index the event before closing
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      
-      pool.close(relays);
-
-      // Return generic response
-      return NextResponse.json({
-        success: true,
-        id: event.id,
-        name,
-        content: event.content,
-        createdAt: new Date(event.created_at * 1000).toISOString(),
-      });
-    } catch (error) {
-      pool.close(relays);
-      console.error('Error publishing to relay:', error);
-      throw error;
-    }
+    // Return success response
+    return NextResponse.json({
+      success: true,
+      id: event.id,
+      name,
+      content: event.content,
+      createdAt: new Date(event.created_at * 1000).toISOString(),
+    });
   } catch (error) {
     console.error('Error creating structured content:', error);
     
@@ -142,69 +105,26 @@ export async function GET(request: NextRequest) {
 
     const publicKey = session.publicKey;
 
-    // Fetch from Nostr relay (server-side)
-    const pool = new SimplePool();
-    const relays = [relayUrl];
+    // Build filter
+    const filter: {
+      kinds: number[];
+      authors: string[];
+      '#d'?: string[];
+    } = {
+      kinds: [30000],
+      authors: [publicKey],
+    };
 
-    return new Promise<NextResponse>((resolve) => {
-      const events: StructuredContentItem[] = [];
+    // If name specified, filter by d tag
+    if (name) {
+      filter['#d'] = [name];
+    }
 
-      // Build filter
-      const filter: any = {
-        kinds: [30000], // Structured content kind
-        authors: [publicKey],
-      };
+    // Fetch from Nostr relay
+    const items = await subscribeToEvents(filter, transformEventToItem);
+    const sortedItems = sortItemsByDate(items);
 
-      // If name specified, filter by d tag
-      if (name) {
-        filter['#d'] = [name]; // Filter by d tag value
-      }
-
-      const sub = pool.subscribeEose(relays, filter, {
-        onevent: (event: Event) => {
-          // Extract name from d tag
-          const dTag = event.tags.find((tag) => tag[0] === 'd');
-          const contentName = dTag ? dTag[1] : 'unknown';
-
-          events.push({
-            id: event.id,
-            name: contentName,
-            content: event.content,
-            createdAt: new Date(event.created_at * 1000).toISOString(),
-          });
-        },
-        onclose: () => {
-          pool.close(relays);
-
-          // Return generic response
-          resolve(
-            NextResponse.json({
-              items: events.sort(
-                (a, b) =>
-                  new Date(b.createdAt).getTime() -
-                  new Date(a.createdAt).getTime()
-              ),
-            })
-          );
-        },
-        maxWait: 5000,
-      });
-
-      // Timeout after 5 seconds
-      setTimeout(() => {
-        sub.close();
-        pool.close(relays);
-        resolve(
-          NextResponse.json({
-            items: events.sort(
-              (a, b) =>
-                new Date(b.createdAt).getTime() -
-                new Date(a.createdAt).getTime()
-            ),
-          })
-        );
-      }, 5000);
-    });
+    return NextResponse.json({ items: sortedItems });
   } catch (error) {
     console.error('Error fetching structured content:', error);
     return NextResponse.json(

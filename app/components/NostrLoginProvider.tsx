@@ -2,6 +2,26 @@
 
 import { useEffect } from 'react';
 
+interface NostrEvent {
+  kind: number;
+  created_at: number;
+  tags: string[][];
+  content: string;
+}
+
+interface SignedNostrEvent extends NostrEvent {
+  id: string;
+  pubkey: string;
+  sig: string;
+}
+
+interface NostrWindow extends Window {
+  nostr?: {
+    getPublicKey: () => Promise<string>;
+    signEvent: (event: NostrEvent) => Promise<SignedNostrEvent>;
+  };
+}
+
 /**
  * NostrLoginProvider - Initializes nostr-login library
  * This must be mounted before any window.nostr calls are made
@@ -19,7 +39,7 @@ export function NostrLoginProvider({ children }: { children: React.ReactNode }) 
             // Handle auth - create session on server
             try {
               // Get public key from window.nostr (should match npub parameter)
-              const nostrWindow = window as typeof window & { nostr?: { getPublicKey: () => Promise<string>; signEvent: (event: any) => Promise<any> } };
+              const nostrWindow = window as NostrWindow;
               if (!nostrWindow.nostr) {
                 throw new Error('window.nostr not available');
               }
@@ -27,7 +47,7 @@ export function NostrLoginProvider({ children }: { children: React.ReactNode }) 
               const publicKey = await nostrWindow.nostr.getPublicKey();
               
               // Create auth event
-              const authEvent = {
+              const authEvent: NostrEvent = {
                 kind: 22242,
                 created_at: Math.floor(Date.now() / 1000),
                 tags: [],

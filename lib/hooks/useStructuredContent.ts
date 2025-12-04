@@ -1,11 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
+import { StructuredContentItem } from '@/lib/nostr/events';
 
-export interface StructuredContentItem {
-  id: string;
-  name: string;
-  content: string;
-  createdAt: string;
-}
+// Re-export for convenience
+export type { StructuredContentItem };
 
 interface StructuredContentResponse {
   items: StructuredContentItem[];
@@ -16,13 +13,13 @@ interface StructuredContentResponse {
 async function fetchStructuredContent(): Promise<StructuredContentResponse> {
   const response = await fetch('/api/content/structured');
   const data = await response.json();
-  
+
   if (data.error === 'NOSTR_CREDENTIALS_MISSING') {
     const error = new Error('NOSTR_CREDENTIALS_MISSING') as Error & { credentialsError?: boolean };
     error.credentialsError = true;
     throw error;
   }
-  
+
   return data;
 }
 
@@ -34,7 +31,7 @@ export function useStructuredContent() {
   const refetch = useCallback(async () => {
     setIsLoading(true);
     setError(null);
-    
+
     try {
       const fetchedData = await fetchStructuredContent();
       setData(fetchedData);

@@ -1,14 +1,10 @@
-import { SimplePool, Event } from 'nostr-tools';
 import { getSession } from '@/lib/auth/session';
+import { subscribeToEvents } from '@/lib/nostr/relay';
+import { transformEventToItem, sortItemsByDate } from '@/lib/nostr/events';
+import type { StructuredContentItem } from '@/lib/nostr/events';
 
-export interface StructuredContentItem {
-  id: string;
-  name: string;
-  content: string;
-  createdAt: string;
-}
-
-const relayUrl = process.env.NOSTR_RELAY_URL || 'wss://relay.damus.io';
+// Re-export for convenience
+export type { StructuredContentItem };
 
 /**
  * Server-side service to fetch structured content from Nostr
@@ -35,57 +31,13 @@ export async function getStructuredContent(publicKey?: string): Promise<Structur
     console.error('No public key available for fetching content');
     return [];
   }
-  
-  const pool = new SimplePool();
-  const relays = [relayUrl];
 
-  return new Promise<StructuredContentItem[]>((resolve) => {
-    const events: StructuredContentItem[] = [];
+  const filter = {
+    kinds: [30000],
+    authors: [targetPublicKey],
+  };
 
-    // Build filter for structured content (kind 30000)
-    const filter = {
-      kinds: [30000],
-      authors: [targetPublicKey],
-    };
-
-    const sub = pool.subscribeEose(relays, filter, {
-      onevent: (event: Event) => {
-        // Extract name from d tag
-        const dTag = event.tags.find((tag) => tag[0] === 'd');
-        const contentName = dTag ? dTag[1] : 'unknown';
-
-        events.push({
-          id: event.id,
-          name: contentName,
-          content: event.content,
-          createdAt: new Date(event.created_at * 1000).toISOString(),
-        });
-      },
-      onclose: () => {
-        pool.close(relays);
-        resolve(
-          events.sort(
-            (a, b) =>
-              new Date(b.createdAt).getTime() -
-              new Date(a.createdAt).getTime()
-          )
-        );
-      },
-      maxWait: 5000,
-    });
-
-    // Timeout after 5 seconds
-    setTimeout(() => {
-      sub.close();
-      pool.close(relays);
-      resolve(
-        events.sort(
-          (a, b) =>
-            new Date(b.createdAt).getTime() -
-            new Date(a.createdAt).getTime()
-        )
-      );
-    }, 5000);
-  });
+  const items = await subscribeToEvents(filter, transformEventToItem);
+  return sortItemsByDate(items);
 }
 
