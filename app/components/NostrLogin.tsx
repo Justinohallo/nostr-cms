@@ -201,7 +201,18 @@ export function NostrLogin() {
 
       console.log('Login successful, redirecting...', data);
 
-      // Clear private key from memory immediately
+      // Store private key temporarily in sessionStorage for signing events
+      // This is client-side only and will be cleared on logout
+      if (typeof window !== 'undefined') {
+        try {
+          // Store the original trimmed key (user input) for later use
+          sessionStorage.setItem('nostr_private_key', trimmedKey);
+        } catch (err) {
+          console.warn('Failed to store private key in sessionStorage:', err);
+        }
+      }
+
+      // Clear private key from component state
       setPrivateKey('');
       
       // Success - redirect to studio or reload

@@ -20,23 +20,78 @@ export default function StudioPage() {
 
     setLoading(true);
     try {
-      // Sign event client-side using NIP-07 or NIP-46
+      // Sign event client-side using NIP-07, manual key, or NIP-46
       let signedEvent;
       
+      const eventTemplate = {
+        kind: 30000,
+        created_at: Math.floor(Date.now() / 1000),
+        tags: [['d', name]],
+        content,
+      };
+
       if (typeof window !== 'undefined' && (window as any).nostr) {
         // Use NIP-07 browser extension
-        const eventTemplate = {
-          kind: 30000,
-          created_at: Math.floor(Date.now() / 1000),
-          tags: [['d', name]],
-          content,
-        };
-        
         signedEvent = await (window as any).nostr.signEvent(eventTemplate);
+      } else if (typeof window !== 'undefined') {
+        // Try to use stored private key from manual login
+        const storedKey = sessionStorage.getItem('nostr_private_key');
+        if (storedKey) {
+          try {
+            const { getPublicKey, finalizeEvent } = await import('nostr-tools');
+            const { hexToBytes } = await import('@noble/hashes/utils');
+            const { decode, NostrTypeGuard } = await import('nostr-tools/nip19');
+
+            let privateKeyBytes: Uint8Array;
+            const trimmedKey = storedKey.trim();
+
+            // Handle nsec format
+            if (NostrTypeGuard.isNSec(trimmedKey)) {
+              const decoded = decode(trimmedKey);
+              if (decoded.type === 'nsec') {
+                privateKeyBytes = decoded.data;
+              } else {
+                throw new Error('Invalid nsec format');
+              }
+            } else {
+              // Handle hex format
+              let normalizedKey = trimmedKey.toLowerCase();
+              if (normalizedKey.startsWith('0x')) {
+                normalizedKey = normalizedKey.slice(2);
+              }
+              if (!/^[0-9a-f]+$/.test(normalizedKey)) {
+                throw new Error('Invalid hex characters');
+              }
+              if (normalizedKey.length === 63) {
+                normalizedKey = '0' + normalizedKey;
+              }
+              if (normalizedKey.length !== 64) {
+                throw new Error('Invalid private key length');
+              }
+              privateKeyBytes = hexToBytes(normalizedKey);
+            }
+
+            // Verify the stored key matches the authenticated public key
+            const keyPublicKey = getPublicKey(privateKeyBytes);
+            if (keyPublicKey !== publicKey) {
+              throw new Error('Stored private key does not match authenticated user');
+            }
+
+            signedEvent = finalizeEvent(eventTemplate, privateKeyBytes);
+          } catch (err) {
+            console.error('Error signing with stored key:', err);
+            alert('Failed to sign event. Please log out and log back in.');
+            setLoading(false);
+            return;
+          }
+        } else {
+          // No stored key and no NIP-07 extension
+          alert('Please install a Nostr browser extension (like Alby or nos2x) to sign events, or log out and log back in with your private key.');
+          setLoading(false);
+          return;
+        }
       } else {
-        // For NIP-46, we'd need to implement the full protocol
-        // For now, show an error
-        alert('Please install a Nostr browser extension (like Alby or nos2x) to sign events');
+        alert('Unable to sign events in this environment');
         setLoading(false);
         return;
       }

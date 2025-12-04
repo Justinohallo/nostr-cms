@@ -50,6 +50,16 @@ export function useAuth() {
   const logout = async () => {
     try {
       await fetch('/api/auth/logout', { method: 'POST' });
+      
+      // Clear stored private key from sessionStorage
+      if (typeof window !== 'undefined') {
+        try {
+          sessionStorage.removeItem('nostr_private_key');
+        } catch (err) {
+          console.warn('Failed to clear private key from sessionStorage:', err);
+        }
+      }
+      
       setAuthState({
         authenticated: false,
         publicKey: null,
