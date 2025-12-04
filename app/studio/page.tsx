@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { NostrLogin } from '../components/NostrLogin';
 import { StructuredContentForm } from '../components/StructuredContentForm';
 import { useAuth } from '@/lib/hooks/useAuth';
-import { useStructuredContent } from '@/lib/hooks/useStructuredContent';
+import { useStructuredContent, StructuredContentItem } from '@/lib/hooks/useStructuredContent';
 
 // Type for window.nostr from nostr-login
 type NostrWindow = typeof window & {
@@ -35,6 +35,7 @@ export default function StudioPage() {
   const { items, isLoading, mutate } = useStructuredContent();
   const formKeyRef = useRef(0);
   const prevValuesRef = useRef<string>('');
+  const justPublishedRef = useRef(false);
 
   const handleSubmit = async (name: string, content: string) => {
     if (!authenticated || !publicKey) {
@@ -83,6 +84,9 @@ export default function StudioPage() {
       }
 
       if (data.success) {
+        // Mark that we just published to prevent form remount
+        justPublishedRef.current = true;
+
         // Optimistically update without triggering loading state
         const newItem = {
           id: data.id,
@@ -104,12 +108,40 @@ export default function StudioPage() {
             const response = await fetch('/api/content/structured');
             const fetchedData = await response.json();
             if (fetchedData.items) {
-              // Update data silently without triggering loading
-              mutate((current) => ({ items: fetchedData.items }));
+              // Only update if the fetched data has newer content than what we optimistically set
+              // This prevents overwriting with stale relay data
+              mutate((current) => {
+                if (!current) return { items: fetchedData.items };
+
+                // Merge fetched data with optimistic update, preferring newer content
+                const mergedItems = fetchedData.items.map((fetchedItem: StructuredContentItem) => {
+                  const optimisticItem = current.items.find(item => item.name === fetchedItem.name);
+                  if (optimisticItem && new Date(optimisticItem.createdAt) > new Date(fetchedItem.createdAt)) {
+                    // Keep optimistic update if it's newer
+                    return optimisticItem;
+                  }
+                  return fetchedItem;
+                });
+
+                // Add any items from optimistic update that aren't in fetched data yet
+                current.items.forEach((optimisticItem) => {
+                  if (!mergedItems.find((item: StructuredContentItem) => item.name === optimisticItem.name)) {
+                    mergedItems.push(optimisticItem);
+                  }
+                });
+
+                return { items: mergedItems };
+              });
             }
+
+            // Reset the flag after refetch completes
+            setTimeout(() => {
+              justPublishedRef.current = false;
+            }, 1000);
           } catch (err) {
             console.error('Background refetch error:', err);
             // Silently fail - optimistic update is already shown
+            justPublishedRef.current = false;
           }
         }, 2000);
       }
@@ -135,11 +167,15 @@ export default function StudioPage() {
   }, [items]);
 
   // Only update form key when values actually change (prevents unnecessary remounts)
+  // But don't remount if we just published (to preserve user's input)
   useEffect(() => {
     const valuesString = JSON.stringify(initialValues);
-    if (valuesString !== prevValuesRef.current) {
+    if (valuesString !== prevValuesRef.current && !justPublishedRef.current) {
       prevValuesRef.current = valuesString;
       formKeyRef.current += 1;
+    } else if (justPublishedRef.current && valuesString !== prevValuesRef.current) {
+      // Update the ref but don't remount - form will keep current values
+      prevValuesRef.current = valuesString;
     }
   }, [initialValues]);
 
