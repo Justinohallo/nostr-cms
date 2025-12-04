@@ -1,75 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { finalizeEvent, getPublicKey, SimplePool, Event } from 'nostr-tools';
-import { hexToBytes } from '@noble/hashes/utils';
-import { decode, NostrTypeGuard } from 'nostr-tools/nip19';
-
-// Server-side key management (reused from main route)
-let privateKey: Uint8Array | null = null;
-
-function getPrivateKey(): Uint8Array | null {
-  if (privateKey) {
-    return privateKey;
-  }
-
-  const envPrivateKey = process.env.NOSTR_PRIVATE_KEY;
-  if (!envPrivateKey) {
-    return null;
-  }
-
-  try {
-    const trimmedKey = envPrivateKey.trim();
-    
-    // Handle nsec format (bech32 encoded)
-    if (NostrTypeGuard.isNSec(trimmedKey)) {
-      const decoded = decode(trimmedKey);
-      if (decoded.type === 'nsec') {
-        privateKey = decoded.data;
-        return privateKey;
-      }
-      throw new Error('Failed to decode nsec format');
-    }
-    
-    // Handle hex format
-    let normalizedKey = trimmedKey.toLowerCase();
-    
-    // Remove '0x' prefix if present
-    if (normalizedKey.startsWith('0x')) {
-      normalizedKey = normalizedKey.slice(2);
-    }
-    
-    // Validate hex characters (only 0-9, a-f)
-    if (!/^[0-9a-f]+$/.test(normalizedKey)) {
-      throw new Error('Invalid hex characters detected. Private key must contain only 0-9 and a-f (or A-F)');
-    }
-    
-    // Pad with leading zero if length is 63 (should be 64 for 32 bytes)
-    if (normalizedKey.length === 63) {
-      normalizedKey = '0' + normalizedKey;
-    }
-    
-    // Validate length (should be 64 hex characters for 32 bytes)
-    if (normalizedKey.length !== 64) {
-      throw new Error(`Invalid private key length: expected 64 hex characters, got ${normalizedKey.length}. If using nsec format, it should start with 'nsec1'`);
-    }
-    
-    privateKey = hexToBytes(normalizedKey);
-    return privateKey;
-  } catch (error) {
-    console.error('Error parsing NOSTR_PRIVATE_KEY:', error);
-    if (error instanceof Error) {
-      console.error('Error details:', error.message);
-    }
-    return null;
-  }
-}
-
-function requirePrivateKey(): Uint8Array {
-  const key = getPrivateKey();
-  if (!key) {
-    throw new Error('NOSTR_PRIVATE_KEY_NOT_CONFIGURED');
-  }
-  return key;
-}
+import { verifyEvent, SimplePool, Event } from 'nostr-tools';
+import { getSessionFromRequest } from '@/lib/auth/session';
 
 const relayUrl = process.env.NOSTR_RELAY_URL || 'wss://relay.damus.io';
 
@@ -82,51 +13,57 @@ interface StructuredContentItem {
 }
 
 // POST - Create/update structured content
+// Accepts a signed event from the client
 export async function POST(request: NextRequest) {
   try {
-    const { name, content } = await request.json();
-
-    if (!name || typeof name !== 'string') {
-      return NextResponse.json(
-        { error: 'Content name is required' },
-        { status: 400 }
-      );
-    }
-
-    if (!content || typeof content !== 'string') {
-      return NextResponse.json(
-        { error: 'Content is required' },
-        { status: 400 }
-      );
-    }
-
-    let privateKeyBytes: Uint8Array;
-    try {
-      privateKeyBytes = requirePrivateKey();
-    } catch (error) {
+    // Check authentication
+    const session = getSessionFromRequest(request);
+    if (!session) {
       return NextResponse.json(
         { 
-          error: 'NOSTR_CREDENTIALS_MISSING',
-          message: 'Nostr credentials are not configured. Please set NOSTR_PRIVATE_KEY environment variable.'
+          error: 'UNAUTHORIZED',
+          message: 'You must be logged in to publish content.'
         },
-        { status: 503 }
+        { status: 401 }
       );
     }
 
-    const publicKey = getPublicKey(privateKeyBytes);
+    const { event } = await request.json();
 
-    // Create structured content event (kind 30000 = replaceable event per NIP-33)
-    // Using d tag to identify content type (mission, charter, values, etc.)
-    const eventTemplate = {
-      kind: 30000,
-      created_at: Math.floor(Date.now() / 1000),
-      tags: [
-        ['d', name], // Identifier tag for this content type
-      ],
-      content,
-    };
+    if (!event) {
+      return NextResponse.json(
+        { error: 'Event is required' },
+        { status: 400 }
+      );
+    }
 
-    const event = finalizeEvent(eventTemplate, privateKeyBytes);
+    // Verify event signature
+    if (!verifyEvent(event)) {
+      return NextResponse.json(
+        { error: 'Invalid event signature' },
+        { status: 400 }
+      );
+    }
+
+    // Verify event author matches authenticated user
+    if (event.pubkey !== session.publicKey) {
+      return NextResponse.json(
+        { error: 'Event author does not match authenticated user' },
+        { status: 403 }
+      );
+    }
+
+    // Verify event kind is structured content (30000)
+    if (event.kind !== 30000) {
+      return NextResponse.json(
+        { error: 'Invalid event kind. Expected 30000 (structured content)' },
+        { status: 400 }
+      );
+    }
+
+    // Extract name from d tag
+    const dTag = event.tags.find((tag) => tag[0] === 'd');
+    const name = dTag ? dTag[1] : 'unknown';
 
     // Publish to Nostr relay (server-side)
     const pool = new SimplePool();
@@ -191,20 +128,19 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const name = searchParams.get('name'); // Optional: filter by name
 
-    let privateKeyBytes: Uint8Array;
-    try {
-      privateKeyBytes = requirePrivateKey();
-    } catch (error) {
+    // Check authentication
+    const session = getSessionFromRequest(request);
+    if (!session) {
       return NextResponse.json(
         { 
-          error: 'NOSTR_CREDENTIALS_MISSING',
-          message: 'Nostr credentials are not configured. Please set NOSTR_PRIVATE_KEY environment variable.'
+          error: 'UNAUTHORIZED',
+          message: 'You must be logged in to fetch content.'
         },
-        { status: 503 }
+        { status: 401 }
       );
     }
 
-    const publicKey = getPublicKey(privateKeyBytes);
+    const publicKey = session.publicKey;
 
     // Fetch from Nostr relay (server-side)
     const pool = new SimplePool();

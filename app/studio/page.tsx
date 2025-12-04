@@ -2,23 +2,51 @@
 
 import { useState, useMemo } from 'react';
 import { StructuredContentForm } from '../components/StructuredContentForm';
-import { CredentialsError } from '../components/CredentialsError';
+import { NostrLogin } from '../components/NostrLogin';
 import Link from 'next/link';
 import { useStructuredContent } from '@/lib/hooks/useStructuredContent';
+import { useAuth } from '@/lib/hooks/useAuth';
 
 export default function StudioPage() {
   const [loading, setLoading] = useState(false);
-  const { items, isLoading, credentialsError, mutate } = useStructuredContent();
+  const { authenticated, publicKey, loading: authLoading, logout } = useAuth();
+  const { items, isLoading, mutate } = useStructuredContent();
 
   const handleSubmit = async (name: string, content: string) => {
+    if (!authenticated || !publicKey) {
+      alert('You must be logged in to publish content');
+      return;
+    }
+
     setLoading(true);
     try {
+      // Sign event client-side using NIP-07 or NIP-46
+      let signedEvent;
+      
+      if (typeof window !== 'undefined' && (window as any).nostr) {
+        // Use NIP-07 browser extension
+        const eventTemplate = {
+          kind: 30000,
+          created_at: Math.floor(Date.now() / 1000),
+          tags: [['d', name]],
+          content,
+        };
+        
+        signedEvent = await (window as any).nostr.signEvent(eventTemplate);
+      } else {
+        // For NIP-46, we'd need to implement the full protocol
+        // For now, show an error
+        alert('Please install a Nostr browser extension (like Alby or nos2x) to sign events');
+        setLoading(false);
+        return;
+      }
+
       const response = await fetch('/api/content/structured', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ name, content }),
+        body: JSON.stringify({ event: signedEvent }),
       });
 
       const data = await response.json();
@@ -70,6 +98,37 @@ export default function StudioPage() {
     };
   }, [items]);
 
+  if (authLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
+        <div className="text-gray-500 dark:text-gray-400">Loading...</div>
+      </div>
+    );
+  }
+
+  if (!authenticated) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
+        <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
+          <div className="w-full">
+            <div className="mb-6 flex items-center justify-between">
+              <h1 className="text-3xl font-semibold text-black dark:text-zinc-50">
+                Studio
+              </h1>
+              <Link
+                href="/"
+                className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+              >
+                ← View Site
+              </Link>
+            </div>
+            <NostrLogin />
+          </div>
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
       <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
@@ -78,17 +137,28 @@ export default function StudioPage() {
             <h1 className="text-3xl font-semibold text-black dark:text-zinc-50">
               Studio
             </h1>
-            <Link
-              href="/"
-              className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
-            >
-              ← View Site
-            </Link>
+            <div className="flex items-center gap-4">
+              {publicKey && (
+                <div className="text-sm text-gray-600 dark:text-gray-400">
+                  {publicKey.slice(0, 8)}...{publicKey.slice(-8)}
+                </div>
+              )}
+              <button
+                onClick={logout}
+                className="text-sm text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+              >
+                Logout
+              </button>
+              <Link
+                href="/"
+                className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+              >
+                ← View Site
+              </Link>
+            </div>
           </div>
           
-          {credentialsError ? (
-            <CredentialsError />
-          ) : isLoading ? (
+          {isLoading ? (
             <div className="flex items-center justify-center py-12">
               <div className="text-gray-500 dark:text-gray-400">Loading...</div>
             </div>
