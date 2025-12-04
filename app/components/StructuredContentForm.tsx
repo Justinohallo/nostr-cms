@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useForm } from 'react-hook-form';
 
 interface StructuredContentFormProps {
   onSubmit: (name: string, content: string) => Promise<void>;
@@ -12,73 +12,66 @@ interface StructuredContentFormProps {
   };
 }
 
-export function StructuredContentForm({ 
-  onSubmit, 
+type FormValues = {
+  mission: string;
+  charter: string;
+  values: string;
+};
+
+export function StructuredContentForm({
+  onSubmit,
   isLoading = false,
-  initialValues 
+  initialValues
 }: StructuredContentFormProps) {
-  const [mission, setMission] = useState(initialValues?.mission || '');
-  const [charter, setCharter] = useState(initialValues?.charter || '');
-  const [values, setValues] = useState(initialValues?.values || '');
+  const { register, handleSubmit, watch, reset, formState: { isSubmitting, isDirty } } = useForm<FormValues>({
+    defaultValues: {
+      mission: initialValues?.mission || '',
+      charter: initialValues?.charter || '',
+      values: initialValues?.values || '',
+    },
+  });
 
-  // Update form when initialValues change
-  useEffect(() => {
-    if (initialValues) {
-      setMission(initialValues.mission || '');
-      setCharter(initialValues.charter || '');
-      setValues(initialValues.values || '');
-    }
-  }, [initialValues]);
+  // Watch specific fields for button disabled state
+  const missionValue = watch('mission') || '';
+  const charterValue = watch('charter') || '';
+  const valuesValue = watch('values') || '';
 
-  const handleSaveAll = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (isLoading) return;
+  const onSaveAll = async (data: FormValues) => {
+    if (isLoading || !isDirty) return;
 
     // Save all three fields
     const saves = [];
-    if (mission.trim()) {
-      saves.push(onSubmit('mission', mission));
+    if (data.mission.trim()) {
+      saves.push(onSubmit('mission', data.mission));
     }
-    if (charter.trim()) {
-      saves.push(onSubmit('charter', charter));
+    if (data.charter.trim()) {
+      saves.push(onSubmit('charter', data.charter));
     }
-    if (values.trim()) {
-      saves.push(onSubmit('values', values));
+    if (data.values.trim()) {
+      saves.push(onSubmit('values', data.values));
     }
 
     if (saves.length > 0) {
       await Promise.all(saves);
+      // Reset form to mark it as not dirty after successful submission
+      reset(data, { keepValues: true });
     }
   };
 
-  const handleSaveField = async (name: string, content: string) => {
-    if (!content.trim() || isLoading) return;
-    await onSubmit(name, content);
-  };
-
   return (
-    <form onSubmit={handleSaveAll} className="flex flex-col gap-6">
+    <form onSubmit={handleSubmit(onSaveAll)} className="flex flex-col gap-6">
       <div className="flex flex-col gap-4">
         <div>
           <label className="block text-sm font-semibold mb-2 text-black dark:text-white">
             Mission
           </label>
           <textarea
-            value={mission}
-            onChange={(e) => setMission(e.target.value)}
+            {...register('mission')}
             placeholder="Enter your mission statement..."
             className="w-full p-4 border border-gray-300 rounded-lg dark:border-gray-700 dark:bg-gray-800 dark:text-white"
             rows={4}
-            disabled={isLoading}
+            disabled={isLoading || isSubmitting}
           />
-          <button
-            type="button"
-            onClick={() => handleSaveField('mission', mission)}
-            disabled={isLoading || !mission.trim()}
-            className="mt-2 px-4 py-2 text-sm bg-gray-600 text-white rounded-lg hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            Save Mission
-          </button>
         </div>
 
         <div>
@@ -86,21 +79,12 @@ export function StructuredContentForm({
             Charter
           </label>
           <textarea
-            value={charter}
-            onChange={(e) => setCharter(e.target.value)}
+            {...register('charter')}
             placeholder="Enter your charter..."
             className="w-full p-4 border border-gray-300 rounded-lg dark:border-gray-700 dark:bg-gray-800 dark:text-white"
             rows={4}
-            disabled={isLoading}
+            disabled={isLoading || isSubmitting}
           />
-          <button
-            type="button"
-            onClick={() => handleSaveField('charter', charter)}
-            disabled={isLoading || !charter.trim()}
-            className="mt-2 px-4 py-2 text-sm bg-gray-600 text-white rounded-lg hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            Save Charter
-          </button>
         </div>
 
         <div>
@@ -108,30 +92,21 @@ export function StructuredContentForm({
             Values
           </label>
           <textarea
-            value={values}
-            onChange={(e) => setValues(e.target.value)}
+            {...register('values')}
             placeholder="Enter your values..."
             className="w-full p-4 border border-gray-300 rounded-lg dark:border-gray-700 dark:bg-gray-800 dark:text-white"
             rows={4}
-            disabled={isLoading}
+            disabled={isLoading || isSubmitting}
           />
-          <button
-            type="button"
-            onClick={() => handleSaveField('values', values)}
-            disabled={isLoading || !values.trim()}
-            className="mt-2 px-4 py-2 text-sm bg-gray-600 text-white rounded-lg hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            Save Values
-          </button>
         </div>
       </div>
 
       <button
         type="submit"
-        disabled={isLoading || (!mission.trim() && !charter.trim() && !values.trim())}
+        disabled={isLoading || isSubmitting || !isDirty || (!missionValue.trim() && !charterValue.trim() && !valuesValue.trim())}
         className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        {isLoading ? 'Saving...' : 'Save All'}
+        {isLoading || isSubmitting ? 'Publishing...' : 'Publish'}
       </button>
     </form>
   );
