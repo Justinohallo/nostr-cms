@@ -1,49 +1,20 @@
 'use client';
 
+import { publishEvent, signEvent } from '@/lib/utils/publishing';
 import { useMemo, useState } from 'react';
 
+import { ErrorMessage } from '../components/ErrorMessage';
 import Link from 'next/link';
 import { NostrLogin } from '../components/NostrLogin';
 import { StructuredContentForm } from '../components/StructuredContentForm';
-import { ErrorMessage } from '../components/ErrorMessage';
 import { useAuth } from '@/lib/hooks/useAuth';
 import { useStructuredContent } from '@/lib/hooks/useStructuredContent';
-import { signEvent, publishEvent } from '@/lib/utils/publishing';
-import { mergeOptimisticUpdate } from '@/lib/utils/optimistic';
 
 export default function StudioPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { authenticated, publicKey, loading: authLoading, logout } = useAuth();
   const { items, isLoading, mutate } = useStructuredContent();
-
-  const handleOptimisticUpdate = (newItem: {
-    id: string;
-    name: string;
-    content: string;
-    createdAt: string;
-  }) => {
-    mutate((current) => {
-      if (!current) return { items: [newItem] };
-      const filtered = current.items.filter((item) => item.name !== newItem.name);
-      return { items: [newItem, ...filtered] };
-    });
-  };
-
-  const scheduleBackgroundRefetch = () => {
-    setTimeout(async () => {
-      try {
-        const response = await fetch('/api/content/structured');
-        const fetchedData = await response.json();
-        if (fetchedData.items) {
-          mutate((current) => mergeOptimisticUpdate(current, fetchedData.items));
-        }
-      } catch (err) {
-        console.error('Background refetch error:', err);
-        // Silently fail - optimistic update is already shown
-      }
-    }, 2000);
-  };
 
   const handleSubmit = async (name: string, content: string) => {
     if (!authenticated || !publicKey) {
@@ -59,15 +30,15 @@ export default function StudioPage() {
       const data = await publishEvent(signedEvent);
 
       if (data.success) {
-        const newItem = {
-          id: data.id,
-          name: data.name,
-          content: data.content,
-          createdAt: data.createdAt,
-        };
+        // Optimistic update
+        mutate((current) => {
+          if (!current) return { items: [{ id: data.id, name: data.name, content: data.content, createdAt: data.createdAt }] };
+          const filtered = current.items.filter((item) => item.name !== data.name);
+          return { items: [{ id: data.id, name: data.name, content: data.content, createdAt: data.createdAt }, ...filtered] };
+        });
 
-        handleOptimisticUpdate(newItem);
-        scheduleBackgroundRefetch();
+        // Refetch after a delay to get the latest from relay
+        setTimeout(() => mutate(), 2000);
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to publish structured content. Please try again.';
