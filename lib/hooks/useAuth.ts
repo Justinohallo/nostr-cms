@@ -8,6 +8,22 @@ interface AuthState {
   loading: boolean;
 }
 
+// Global registry of all useAuth instances to refresh them on login
+const authInstances = new Set<() => Promise<void>>();
+
+// Set up global listener for login success (only once, module level)
+if (typeof window !== 'undefined') {
+  const handleLoginSuccess = () => {
+    // Small delay to ensure session cookie is set
+    setTimeout(() => {
+      // Refresh all auth instances
+      authInstances.forEach((checkAuth) => checkAuth());
+    }, 200);
+  };
+
+  window.addEventListener('nostr-login-success', handleLoginSuccess);
+}
+
 export function useAuth() {
   const [authState, setAuthState] = useState<AuthState>({
     authenticated: false,
@@ -43,6 +59,11 @@ export function useAuth() {
       });
     }
   }, []);
+
+  // Register this instance for global refresh (only register once per instance)
+  if (typeof window !== 'undefined') {
+    authInstances.add(checkAuth);
+  }
 
   // Lazy initialization - check auth on first access if not already checked
   if (!hasCheckedRef.current && authState.loading) {
