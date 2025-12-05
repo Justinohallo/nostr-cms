@@ -1,46 +1,35 @@
 'use client';
 
-import { useRef, useState } from 'react';
-
-let hasRedirected = false;
+import { useEffect, useState } from 'react';
 
 export function NostrLogin() {
   const [loading, setLoading] = useState(false);
 
+  useEffect(() => {
+    const handleAuthSuccess = () => {
+      setTimeout(() => {
+        window.location.href = '/studio';
+      }, 300);
+    };
+
+    const handleAuthError = (e: Event) => {
+      const customEvent = e as CustomEvent<{ error: string }>;
+      console.error('Login error:', customEvent.detail?.error);
+      setLoading(false);
+    };
+
+    window.addEventListener('nostr-login-success', handleAuthSuccess);
+    window.addEventListener('nostr-login-error', handleAuthError);
+
+    return () => {
+      window.removeEventListener('nostr-login-success', handleAuthSuccess);
+      window.removeEventListener('nostr-login-error', handleAuthError);
+    };
+  }, []);
+
   const handleLogin = async () => {
     setLoading(true);
     try {
-      // Set up event listeners when login is initiated
-      const handleAuthSuccess = async () => {
-        if (hasRedirected) return;
-        hasRedirected = true;
-
-        // Wait a bit longer to ensure session cookie is set and auth state can update
-        await new Promise(resolve => setTimeout(resolve, 300));
-
-        // Use reload instead of href to ensure full page refresh and auth state check
-        window.location.href = '/studio';
-      };
-
-      const handleAuthError = (e: Event) => {
-        const customEvent = e as CustomEvent<{ error: string }>;
-        console.error('Login error:', customEvent.detail?.error);
-        setLoading(false);
-      };
-
-      const handleNlAuth = (e: Event) => {
-        const customEvent = e as CustomEvent<{ type?: string }>;
-        if (customEvent.detail?.type === 'login' || customEvent.detail?.type === 'signup') {
-          handleAuthSuccess();
-        }
-      };
-
-      // Add listeners
-      window.addEventListener('nostr-login-success', handleAuthSuccess, { once: true });
-      window.addEventListener('nostr-login-error', handleAuthError, { once: true });
-      document.addEventListener('nlAuth', handleNlAuth, { once: true });
-
-      // Use nostr-login's launch function to show auth UI
       const { launch } = await import('nostr-login');
       await launch('welcome');
     } catch (error) {
