@@ -1,11 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
+import { StructuredContentItem } from '@/lib/nostr/events';
 
-export interface StructuredContentItem {
-  id: string;
-  name: string;
-  content: string;
-  createdAt: string;
-}
+// Re-export for convenience
+export type { StructuredContentItem };
 
 interface StructuredContentResponse {
   items: StructuredContentItem[];
@@ -16,13 +13,13 @@ interface StructuredContentResponse {
 async function fetchStructuredContent(): Promise<StructuredContentResponse> {
   const response = await fetch('/api/content/structured');
   const data = await response.json();
-  
+
   if (data.error === 'NOSTR_CREDENTIALS_MISSING') {
     const error = new Error('NOSTR_CREDENTIALS_MISSING') as Error & { credentialsError?: boolean };
     error.credentialsError = true;
     throw error;
   }
-  
+
   return data;
 }
 
@@ -30,11 +27,12 @@ export function useStructuredContent() {
   const [data, setData] = useState<StructuredContentResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
+  const hasFetchedRef = useRef(false);
 
   const refetch = useCallback(async () => {
     setIsLoading(true);
     setError(null);
-    
+
     try {
       const fetchedData = await fetchStructuredContent();
       setData(fetchedData);
@@ -45,23 +43,26 @@ export function useStructuredContent() {
     }
   }, []);
 
-  useEffect(() => {
+  // Lazy initialization - fetch on first access if not already fetched
+  if (!hasFetchedRef.current && isLoading && !data) {
+    hasFetchedRef.current = true;
     refetch();
-  }, [refetch]);
+  }
 
   const credentialsError = (error as any)?.credentialsError === true;
 
   const mutate = useCallback(async (updater?: (current: StructuredContentResponse | null) => StructuredContentResponse | null) => {
     if (updater) {
-      // Optimistic update
+      // Optimistic update only - don't refetch immediately
       const updated = updater(data);
       if (updated) {
         setData(updated);
+        setIsLoading(false); // Ensure loading is false after optimistic update
       }
+    } else {
+      // Only refetch when called without updater
+      await refetch();
     }
-    
-    // Always refetch after update
-    await refetch();
   }, [data, refetch]);
 
   return {

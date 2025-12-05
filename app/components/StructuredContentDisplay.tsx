@@ -1,4 +1,4 @@
-import { StructuredContentItem } from '@/lib/services/structuredContent';
+import { StructuredContentItem } from '@/lib/nostr/events';
 
 interface StructuredContentDisplayProps {
   items: StructuredContentItem[];

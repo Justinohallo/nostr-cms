@@ -1,6 +1,6 @@
 import Link from 'next/link';
-import { getStructuredContent } from '@/lib/services/structuredContent';
 import { StructuredContentDisplay } from './components/StructuredContentDisplay';
+import { getStructuredContent } from '@/lib/services/structuredContent';
 
 export default async function Home() {
   const items = await getStructuredContent();
@@ -13,14 +13,22 @@ export default async function Home() {
             <h1 className="text-3xl font-semibold text-black dark:text-zinc-50">
               CMS
             </h1>
-            <Link
-              href="/studio"
-              className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
-            >
-              Studio →
-            </Link>
+            <div className="flex items-center gap-4">
+              <Link
+                href="/generate-keys"
+                className="text-sm text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200"
+              >
+                Generate Keys
+              </Link>
+              <Link
+                href="/studio"
+                className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+              >
+                Studio →
+              </Link>
+            </div>
           </div>
-          
+
           <StructuredContentDisplay items={items} />
         </div>
       </main>
